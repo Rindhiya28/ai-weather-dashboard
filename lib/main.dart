@@ -815,26 +815,41 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     {"role": "ai", "text": "Hello! I'm your AI weather assistant. Ask me anything about weather predictions, forecasts, or climate patterns for Chennai. 🌦️"}
   ];
 
-  void sendMessage() {
-    if (_ctrl.text.trim().isEmpty) return;
-    final userMsg = _ctrl.text.trim();
-    setState(() => messages.add({"role": "user", "text": userMsg}));
-    _ctrl.clear();
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _scroll.animateTo(_scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-    });
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (!mounted) return;
-      setState(() => messages.add({
-        "role": "ai",
-        "text": "Based on my analysis of Chennai's weather patterns and current conditions, there is a moderate chance of rainfall tomorrow. The ML model predicts temperatures around 32–34°C over the next week."
-      }));
-      Future.delayed(const Duration(milliseconds: 100), () {
+  bool _isTyping = false;
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent,
             duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      });
+      }
     });
+  }
+
+  Future<void> sendMessage() async {
+    if (_ctrl.text.trim().isEmpty || _isTyping) return;
+    final userMsg = _ctrl.text.trim();
+    _ctrl.clear();
+    setState(() {
+      messages.add({"role": "user", "text": userMsg});
+      _isTyping = true;
+    });
+    _scrollToBottom();
+    try {
+      final reply = await WeatherService.sendChatMessage(userMsg);
+      if (!mounted) return;
+      setState(() {
+        messages.add({"role": "ai", "text": reply});
+        _isTyping = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        messages.add({"role": "ai", "text": "Could not reach AI backend. Make sure the server is running."});
+        _isTyping = false;
+      });
+    }
+    _scrollToBottom();
   }
 
   @override
@@ -848,8 +863,31 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               child: ListView.builder(
                 controller: _scroll,
                 padding: const EdgeInsets.all(24),
-                itemCount: messages.length,
+                itemCount: messages.length + (_isTyping ? 1 : 0),
                 itemBuilder: (_, i) {
+                  // Show typing indicator as last item
+                  if (_isTyping && i == messages.length) {
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: kCard,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: kBorder),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const SizedBox(
+                            width: 40, height: 10,
+                            child: _TypingDots(),
+                          ),
+                          const SizedBox(width: 8),
+                          Text('AI is thinking...', style: TextStyle(color: kTextSec, fontSize: 12)),
+                        ]),
+                      ),
+                    );
+                  }
                   final msg = messages[i];
                   final isUser = msg["role"] == "user";
                   return Align(
@@ -925,6 +963,44 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           ]),
         ),
       ],
+    );
+  }
+}
+
+////////////////////////////////////////////////////
+/// TYPING DOTS ANIMATION
+////////////////////////////////////////////////////
+
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
+  }
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(3, (i) {
+          final opacity = ((_ctrl.value * 3 - i) % 1.0).clamp(0.2, 1.0);
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            width: 6, height: 6,
+            decoration: BoxDecoration(color: kAccent.withOpacity(opacity), shape: BoxShape.circle),
+          );
+        }),
+      ),
     );
   }
 }
